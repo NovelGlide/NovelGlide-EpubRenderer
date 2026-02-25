@@ -1,1185 +1,923 @@
-# 📚 NovelGlide EPUB Renderer - Detailed Documentation
+# 🌐 NovelGlide EPUB Renderer - Web App
 
-Welcome to the **NovelGlide EPUB Renderer** — a sophisticated, multi-layered system for rendering and interacting with EPUB books across Flutter platforms. This document provides comprehensive technical documentation for developers working with the EPUB rendering pipeline.
+A sophisticated **web-based EPUB renderer** that runs inside the **Flutter WebView** to display book content with full HTML/CSS support, interactive pagination, and seamless Dart ↔ JavaScript communication.
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [Communication Service](#communication-service)
+4. [Core Services](#core-services)
+5. [API Routes & Messages](#api-routes--messages)
+6. [Development Setup](#development-setup)
+7. [Build & Deployment](#build--deployment)
+8. [Integration with Flutter](#integration-with-flutter)
+9. [Troubleshooting](#troubleshooting)
+10. [Performance Optimization](#performance-optimization)
+
+---
 
 ## Overview
 
-The NovelGlide EPUB Renderer is a **hybrid rendering system** that supports two independent rendering engines:
+The **NovelGlide EPUB Renderer** is a **TypeScript + Webpack** web application that:
 
-### **Dual Engine Architecture**
+- 📖 **Renders EPUB books** using the industry-standard `epub.js` library
+- 🔌 **Communicates with Flutter** via JavaScript message channels
+- ⚡ **Handles pagination** intelligently (smooth scroll, RTL support)
+- 🔍 **Provides search** functionality across book content
+- 🎤 **Enables text-to-speech** by extracting readable text nodes
+- 🎨 **Applies styling** dynamically (font size, color, line height)
+- 📱 **Adapts to screen** size changes (orientation, tablet mode)
 
-1. **WebView-Based Renderer** (Primary for rich content)
-   - Full HTML/CSS support
-   - Interactive elements
-   - Custom JavaScript bridges
-   - Ideal for complex layouts
+### Why Web-Based?
 
-2. **HTML Parser Renderer** (Fallback/simple content)
-   - Pure Dart parsing
-   - No WebView overhead
-   - Efficient for simple documents
-   - Lightweight and fast
+**Advantages of rendering in WebView instead of native:**
+- ✅ Full **HTML/CSS/JavaScript** support
+- ✅ **Complex layouts** work as intended
+- ✅ **Publisher formatting** respected
+- ✅ **Pagination engine** handles text flow
+- ✅ **Performance** optimized via browser
+- ✅ **Reusable** across Android/iOS/Web
 
-### Key Capabilities
-
-- ✅ **Full EPUB3 Support** — Handles EPUB2 & EPUB3 specifications
-- ✅ **CFI-Based Bookmarking** — EPUB standard Canonical Fragment Identifiers
-- ✅ **Advanced Search** — Search within chapter or entire book
-- ✅ **Persistent Location** — Auto-save and restore reading position
-- ✅ **Font Management** — Embed and render custom fonts
-- ✅ **Text-to-Speech** — Integrated TTS support
-- ✅ **Responsive Design** — Adapts to tablet/mobile screens
-- ✅ **Performance** — Optimized parsing, caching, and rendering
+**Trade-offs:**
+- ⚠️ Requires **WebView** on device
+- ⚠️ **JavaScript bridge** adds overhead
+- ⚠️ **Memory usage** higher than pure Dart
 
 ---
 
 ## Architecture
 
-### High-Level System Design
+### System Design
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Flutter UI Layer                         │
-│              (ReaderScreen, Controls, Gestures)             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-        ┌──────────────┴──────────────┐
-        │                             │
-┌───────▼─────────────┐    ┌──────────▼──────────────┐
-│  WebView Engine     │    │  HTML Parser Engine     │
-│  (Default)          │    │  (Fallback/Simple)      │
-│                     │    │                         │
-│ - JavaScript Bridge │    │ - Pure Dart Parsing     │
-│ - Local Web Server  │    │ - StreamControllers     │
-│ - Full CSS Support  │    │ - Direct HTML Rendering │
-└──────────┬──────────┘    └──────────┬──────────────┘
-           │                          │
-           └──────────────┬───────────┘
-                          │
-        ┌─────────────────▼────────────────┐
-        │   Reader Core Repository         │
-        │   (Abstract Interface)            │
-        │                                   │
-        │ - Navigation (nextPage, etc.)    │
-        │ - Search (chapter/book-wide)     │
-        │ - Bookmarks (CFI-based)          │
-        │ - State Management               │
-        └──────────────┬────────────────────┘
-                       │
-        ┌──────────────┴──────────────┐
-        │                             │
-┌───────▼─────────────┐    ┌──────────▼──────────────┐
-│  Book Repository    │    │  Location Cache        │
-│  (EPUB Loading)     │    │  (Reading Position)    │
-│                     │    │                        │
-│ - EPUB Parsing      │    │ - CFI Storage          │
-│ - Content Loading   │    │ - Persistent State     │
-│ - Chapter Indexing  │    │ - Page Restoration     │
-└─────────────────────┘    └────────────────────────┘
+Flutter App (Dart)
+    ↓
+WebViewController
+    ↓
+Local Web Server (http://localhost:8080)
+    ↓
+NovelGlide-EpubRenderer (this web app)
+    ├─ HTML/CSS/JavaScript
+    ├─ EPUB.js Library
+    └─ Communication Service
+    ↓
+JavaScript ↔ Dart Bridge (postMessage API)
+    ↓
+Event Streams (Flutter)
+```
+
+### Component Structure
+
+```
+index.js (Entry point)
+    ├─ ReaderApi (Main reader engine)
+    ├─ CommunicationService (JS ↔ Dart bridge)
+    ├─ SearchService (Search functionality)
+    ├─ TtsService (Text extraction)
+    └─ Utils
+        ├─ BreadcrumbUtils (TOC navigation)
+        ├─ TextNodeUtils (Text analysis)
+        └─ DelayTimeUtils (Async timing)
 ```
 
 ### Directory Structure
 
 ```
-lib/
-├── core/
-│   ├── html_parser/              # HTML parsing & DOM manipulation
-│   │   ├── html_parser.dart      # Main HTML parser
-│   │   └── domain/entities/      # HTML document entities
-│   ├── css_parser/               # CSS parsing & styling
-│   └── mime_resolver/            # MIME type handling
+NovelGlide-EpubRenderer/
+├── src/
+│   ├── index.html              # HTML entry point
+│   ├── index.js                # JavaScript entry point
+│   ├── ReaderApi.ts            # Main reader engine
+│   ├── services/
+│   │   ├── CommunicationService.ts    # JS ↔ Dart communication
+│   │   ├── SearchService.ts           # Search in chapter/book
+│   │   └── TtsService.ts              # Text extraction for TTS
+│   ├── utils/
+│   │   ├── BreadcrumbUtils.ts         # Table of contents
+│   │   ├── TextNodeUtils.ts           # Text node analysis
+│   │   └── DelayTimeUtils.ts          # Async utilities
+│   └── sass/
+│       └── main.sass                  # Styling
 │
-├── features/
-│   ├── books/
-│   │   └── data/data_sources/
-│   │       ├── epub_book_loader.dart      # EPUB loading in Isolate
-│   │       ├── epub_content_parser.dart   # HTML/CSS/Image parsing
-│   │       └── epub_data_source.dart      # Book data management
-│   │
-│   └── reader/                   # Reader engine (dual implementation)
-│       ├── data/
-│       │   ├── repositories/
-│       │   │   ├── reader_core_webview_repository_impl.dart    # WebView impl
-│       │   │   ├── reader_core_html_repository_impl.dart       # HTML parser impl
-│       │   │   ├── reader_location_cache_repository_impl.dart  # CFI storage
-│       │   │   ├── reader_search_repository_impl.dart          # Search
-│       │   │   ├── reader_server_repository_impl.dart          # Local server
-│       │   │   └── reader_tts_repository_impl.dart             # Text-to-speech
-│       │   │
-│       │   ├── data_sources/
-│       │   │   └── reader_webview_data_source_impl.dart       # WebView JS bridge
-│       │   │
-│       │   └── data_transfer_objects/
-│       │       └── reader_web_message_dto.dart                # Message format
-│       │
-│       ├── domain/
-│       │   ├── entities/
-│       │   │   ├── reader_set_state_data.dart       # Page state
-│       │   │   ├── reader_search_result_data.dart   # Search results
-│       │   │   └── reader_loading_state_code.dart   # State codes
-│       │   │
-│       │   ├── repositories/
-│       │   │   └── reader_core_repository.dart      # Abstract interface
-│       │   │
-│       │   └── use_cases/
-│       │       ├── search_use_cases/
-│       │       └── tts_use_cases/
-│       │
-│       └── presentation/
-│           ├── pages/
-│           │   └── reader_screen.dart               # Main UI
-│           └── widgets/
-│               ├── reader_core_webview.dart
-│               └── reader_core_html_wrapper.dart
-
-assets/
-└── renderer/                     # HTML/CSS/JS assets for rendering
-    ├── index.html                # Main rendering document
-    ├── styles/
-    └── scripts/
+├── dist/                       # Built output
+│   ├── index.html
+│   ├── index.js
+│   └── index.css
+│
+├── webpack.config.js           # Build configuration
+├── tsconfig.json               # TypeScript configuration
+├── package.json                # Dependencies
+└── README.md                   # This file
 ```
 
 ---
 
-## Core Components
+## Communication Service
 
-### 1. **EpubBookLoader** — Isolated EPUB Loading
+### Overview
 
-**File:** `lib/features/books/data/data_sources/epub_book_loader.dart`
+The **CommunicationService** is the bridge between JavaScript (web) and Dart (mobile app).
 
-Loads EPUB files in a separate Dart Isolate to prevent UI blocking.
+**How it works:**
 
-**Key Features:**
-- Non-blocking file I/O
-- Queue-based task processing
-- Automatic resource cleanup
-- Progress notifications via Stream
-
-**Usage:**
-```dart
-final loader = EpubBookLoader();
-loader.loadByPathSet({'path/to/book.epub'}).listen((result) {
-  final epubBook = result.epubBook;
-  // Process loaded book
-});
+```
+Dart App
+    ↓ (sends message via WebView channel)
+    ↓
+JavaScript CommunicationService.receive()
+    ↓
+Matches route → calls registered callback
+    ↓
+Process (e.g., turn page, search)
+    ↓
+CommunicationService.send() → back to Dart
+    ↓
+Dart App (streams event to UI)
 ```
 
-**Why Isolate?**
-- EPUB files can be 10-100MB+
-- Parsing is CPU-intensive
-- Isolate keeps UI responsive
-- Parallel processing of multiple books
+### API
+
+```typescript
+class CommunicationService {
+    // Set the communication channel (called by Dart)
+    setChannel(channel: any): void
+    
+    // Send a message to Dart
+    static send(route: string, data: any = ""): void
+    
+    // Register callback for incoming message
+    static register(route: string, callback: Function): void
+    
+    // Internal: receive message from Dart
+    receive(route: string, data: any): void
+}
+```
+
+### Message Format
+
+**Dart → JavaScript:**
+```json
+{
+  "route": "nextPage",
+  "data": null
+}
+```
+
+**JavaScript → Dart:**
+```json
+{
+  "route": "setState",
+  "data": {
+    "startCfi": "epubcfi(/6/4[chap1]!/4/2,/1:0,/1:100)",
+    "breadcrumb": "Chapter 1 > Section A",
+    "chapterFileName": "chapter_01.xhtml",
+    "chapterCurrentPage": 5,
+    "chapterTotalPage": 20
+  }
+}
+```
+
+### Registering Routes
+
+Routes are registered in the `ReaderApi` constructor:
+
+```typescript
+CommunicationService.register('main', this.main.bind(this));
+CommunicationService.register('nextPage', this.nextPage.bind(this));
+CommunicationService.register('goto', this.goto.bind(this));
+CommunicationService.register('setFontSize', this.setFontSize.bind(this));
+```
+
+When Dart sends `{ route: 'nextPage' }`, the registered callback is invoked automatically.
 
 ---
 
-### 2. **EpubContentParser** — Content Extraction
+## Core Services
 
-**File:** `lib/features/books/data/data_sources/epub_content_parser.dart`
+### 1. ReaderApi — Main Reader Engine
 
-Extracts and transforms EPUB content into renderable formats.
+**File:** `src/ReaderApi.ts`
 
-**Responsibilities:**
-- Parse page list from EPUB spine
-- Extract HTML documents
-- Load CSS stylesheets
-- Extract images and font files
-- Resolve relative references
+Manages EPUB loading, pagination, navigation, and styling.
 
-**Key Methods:**
+#### Key Properties
 
-```dart
-// Get list of pages (chapters) in spine order
-List<BookPage> parsePageList(epub.EpubBook epubBook)
-
-// Get valid page identifier with fallback
-String getValidPageIdentifier(epub.EpubBook epubBook, String? targetHref)
-
-// Parse HTML document for a page
-HtmlDocument parseHtmlDocument(epub.EpubBook epubBook, String href)
-
-// Load CSS stylesheets for a page
-Map<String, CssDocument> loadStylesheets(
-  epub.EpubBook epubBook, 
-  String href, 
-  List<String> stylePathList
-)
-
-// Extract images asynchronously
-Future<Map<String, ImageFile>> loadImages(...)
+```typescript
+public book: Book                  // EPUB.js book instance
+public rendition: Rendition        // Rendering context
+private isSmoothScroll: boolean   // Smooth scroll enabled?
+private isRtl: Boolean            // Right-to-left layout?
+private fontSize: number          // Current font size
+private lineHeight: number        // Line height multiplier
 ```
 
-**Example Pipeline:**
-```
-EPUB File
-    ↓
-[Isolate] EpubBookLoader
-    ↓
-epub.EpubBook object
-    ↓
-EpubContentParser
-    ├─ parsePageList() → List<BookPage>
-    ├─ parseHtmlDocument() → HtmlDocument
-    ├─ loadStylesheets() → Map<String, CssDocument>
-    └─ loadImages() → Map<String, ImageFile>
-    ↓
-BookHtmlContent (renderable)
-```
+#### Key Methods
 
----
-
-### 3. **Reader Core Repository** — Abstract Interface
-
-**File:** `lib/features/reader/domain/repositories/reader_core_repository.dart`
-
-Defines the contract for both rendering engines.
-
-**Core Methods:**
-```dart
-// Initialize with book and optional starting location
-Future<void> init({
-  required String bookIdentifier,
-  String? pageIdentifier,
-  String? cfi,
-}) async;
+```typescript
+// Entry point (called when Dart initializes reader)
+async main(data: {
+  destination?: string    // CFI, href, or percentage
+  savedLocation?: string  // EPUB location data
+}): Promise<void>
 
 // Navigation
-Future<void> nextPage();
-Future<void> previousPage();
-Future<void> goto({String? pageIdentifier, String? cfi});
+async nextPage(): Promise<void>
+async prevPage(): Promise<void>
+async goto(destination: string): Promise<void>
 
-// Search
-Future<void> searchInCurrentChapter(String query);
-Future<void> searchInWholeBook(String query);
-
-// Text-to-Speech
-void ttsPlay();
-void ttsNext();
-void ttsStop();
-
-// Streams (events emitted by the engine)
-Stream<ReaderSetStateData> get onSetState;
-Stream<String> get onPlayTts;
-Stream<void> get onStopTts;
-Stream<void> get onEndTts;
-Stream<List<ReaderSearchResultData>> get onSetSearchResultList;
+// Styling
+setFontSize(size: number): void
+setFontColor(color: string): void
+setLineHeight(multiplier: number): void
+setSmoothScroll(enabled: boolean): void
 ```
 
-**Design Pattern:** Strategy pattern with two implementations
+#### Navigation Logic
+
+**Next/Previous Page:**
+```
+1. Check RTL layout (right-to-left languages)
+2. Call EPUB.js rendition.next() or rendition.prev()
+3. Wait for 'relocated' event or 'scrollend' event
+4. Emit state update (breadcrumb, CFI, page numbers)
+```
+
+**Goto Destination:**
+```typescript
+// Supports three formats:
+await goto("epubcfi(/6/4...)");              // CFI pointer
+await goto("chapter_01.xhtml");               // File href
+await goto("0.5");                            // Percentage (0-1)
+```
+
+#### Page Calculation
+
+Pages are calculated based on EPUB.js location data:
+
+```typescript
+get currentPage(): number {
+  // Count columns/pages within current chapter
+  // Handles both scrolling and pagination modes
+}
+
+get totalPage(): number {
+  // Total pages in current chapter
+  // Based on rendition width/height
+}
+```
+
+#### State Synchronization
+
+Automatically sends state to Dart on page change:
+
+```typescript
+private syncState(location: any) {
+  const breadcrumb = BreadcrumbUtils.get(
+    this.book.navigation.toc, 
+    location.start.href
+  );
+  
+  CommunicationService.send('setState', {
+    startCfi: location.start.cfi,
+    breadcrumb: breadcrumb,
+    chapterFileName: location.start.href,
+    chapterCurrentPage: this.currentPage,
+    chapterTotalPage: this.totalPage,
+  });
+}
+```
 
 ---
 
-### 4. **WebView Implementation** — Rich HTML Rendering
+### 2. CommunicationService — JavaScript ↔ Dart Bridge
 
-**File:** `lib/features/reader/data/repositories/reader_core_webview_repository_impl.dart`
+**File:** `src/services/CommunicationService.ts`
 
-Uses `webview_flutter` to render EPUB content with full HTML/CSS support.
+Singleton service for bidirectional messaging.
 
-**Architecture:**
-```
-Flutter UI
-    ↓
-WebViewController
-    ↓
-[Local Web Server (port 8080)]
-    ↓
-Browser-based Renderer
-    ├─ HTML/CSS/JavaScript
-    ├─ Interactive elements
-    └─ Pagination JavaScript
-    ↓
-JavaScript → Dart Bridge
-    ↓
-Flutter Stream Events
+```typescript
+// Receive from Dart → route to callback
+receive(route: string, data: any): void
+  → this.keyMap.get(route)(data)
+
+// Send to Dart
+send(route: string, data: any = ""): void
+  → this.channel.postMessage(JSON.stringify({route, data}))
+
+// Register callback
+register(route: string, callback: Function): void
+  → this.keyMap.set(route, callback)
 ```
 
-**Local Web Server:**
-- Serves EPUB content locally
-- Prevents security issues with file:// protocol
-- Handles HTTP requests for resources
-- Integrated into `ReaderServerRepository`
+**Features:**
+- ✅ **Singleton pattern** (`getInstance()`)
+- ✅ **Route-based dispatch** (map string routes to callbacks)
+- ✅ **Fallback console logging** if channel unavailable
+- ✅ **JSON serialization** for safe data transfer
 
-**JavaScript Bridge:**
+**Channel Setup (called by Dart):**
 ```dart
-// Dart → JavaScript
+// Flutter code:
+_dataSource.setChannel();  // Establishes bidirectional channel
+```
+
+---
+
+### 3. SearchService — Search Functionality
+
+**File:** `src/services/SearchService.ts`
+
+Provides chapter-wide and whole-book search.
+
+```typescript
+// Search in entire book
+searchInWholeBook(q: string): void
+  → Loads each spine item
+  → Calls item.find(query)
+  → Returns all results
+
+// Search in current chapter only
+searchInCurrentChapter(q: string): void
+  → Gets current section from CFI
+  → Calls item.find(query)
+  → Returns chapter results
+```
+
+**Result Format:**
+```typescript
+// EPUB.js returns array of matches:
+{
+  cfi: "epubcfi(...)",
+  excerpt: "...matching text content...",
+  // Additional metadata
+}
+```
+
+**Messaging:**
+```typescript
+CommunicationService.send('setSearchResultList', {
+  searchResultList: results
+});
+```
+
+**Performance Notes:**
+- ⚠️ Whole-book search **blocks UI** while loading chapters
+- ✅ Current chapter search is **fast** (~100ms)
+- 💡 Consider implementing **async** search with progress indicator
+
+---
+
+### 4. TtsService — Text-to-Speech Support
+
+**File:** `src/services/TtsService.ts`
+
+Extracts readable text for text-to-speech engine.
+
+```typescript
+// Start TTS playback
+play(): void
+  → Filter visible text nodes
+  → Sort by reading order
+  → Send first paragraph to Dart
+
+// Play next paragraph
+async next(): Promise<void>
+  → Removes first node from queue
+  → If last node, go to next page
+  → Send next paragraph to Dart
+
+// Stop playback
+stop(): void
+  → Clear node queue
+  → Reset state
+```
+
+**Text Node Filtering:**
+```typescript
+this.nodeList = ReaderApi.getInstance().textNodeList
+  .filter((node) => {
+    const hasContent = node.textContent.trim().length > 0;
+    return TextNodeUtils.isVisible(node) && hasContent;
+  });
+```
+
+**Auto Page-Turn:**
+When reaching the last paragraph of a chapter:
+1. Check if book ends
+2. If yes: send `ttsEnd` to Dart (stops playback)
+3. If no: automatically call `nextPage()`, continue TTS
+
+**Messaging Flow:**
+```
+Dart: { route: 'ttsPlay' }
+    ↓
+JS: play() → extract visible text nodes
+    ↓
+JS: send('ttsPlay', 'First paragraph text...')
+    ↓
+Dart: TtsRepository reads message, plays audio
+    ↓
+Dart: send { route: 'ttsNext' }
+    ↓
+JS: next() → dequeue, send next paragraph
+```
+
+---
+
+## API Routes & Messages
+
+### Dart → JavaScript Routes
+
+#### **'main'** — Initialize Reader
+```json
+{
+  "route": "main",
+  "data": {
+    "destination": "epubcfi(...) | chapter.xhtml | 0.5",
+    "savedLocation": "location-data-string"
+  }
+}
+```
+**Action:** Load book, restore location, emit ready
+**Response:** `setState`, `loadDone`
+
+#### **'nextPage'** — Go to Next Page
+```json
+{
+  "route": "nextPage"
+}
+```
+**Action:** Pagination (handles smooth scroll, RTL)
+**Response:** `setState` (new location)
+
+#### **'prevPage'** — Go to Previous Page
+```json
+{
+  "route": "prevPage"
+}
+```
+**Action:** Reverse pagination
+**Response:** `setState` (new location)
+
+#### **'goto'** — Jump to Position
+```json
+{
+  "route": "goto",
+  "data": "epubcfi(...) | chapter.xhtml | 0.75"
+}
+```
+**Action:** Navigate to CFI, href, or percentage
+**Response:** `setState` (new location)
+
+#### **'setFontSize'** — Change Font Size
+```json
+{
+  "route": "setFontSize",
+  "data": 18
+}
+```
+**Action:** Update font size (in pixels)
+**Response:** None (visual change only)
+
+#### **'setFontColor'** — Change Font Color
+```json
+{
+  "route": "setFontColor",
+  "data": "#000000"
+}
+```
+**Action:** Update text color (hex code)
+**Response:** None (visual change only)
+
+#### **'setLineHeight'** — Change Line Height
+```json
+{
+  "route": "setLineHeight",
+  "data": 1.8
+}
+```
+**Action:** Update line height multiplier
+**Response:** None (visual change only)
+
+#### **'setSmoothScroll'** — Toggle Smooth Scroll
+```json
+{
+  "route": "setSmoothScroll",
+  "data": true
+}
+```
+**Action:** Enable/disable smooth scroll animation
+**Response:** None (immediate effect)
+
+#### **'searchInWholeBook'** — Search All Chapters
+```json
+{
+  "route": "searchInWholeBook",
+  "data": "query text"
+}
+```
+**Action:** Search entire book
+**Response:** `setSearchResultList` (all matches)
+
+#### **'searchInCurrentChapter'** — Search This Chapter
+```json
+{
+  "route": "searchInCurrentChapter",
+  "data": "query text"
+}
+```
+**Action:** Search current chapter only
+**Response:** `setSearchResultList` (chapter matches)
+
+#### **'ttsPlay'** — Start Text-to-Speech
+```json
+{
+  "route": "ttsPlay"
+}
+```
+**Action:** Begin TTS from current location
+**Response:** `ttsPlay` (first paragraph text)
+
+#### **'ttsNext'** — Play Next Paragraph
+```json
+{
+  "route": "ttsNext"
+}
+```
+**Action:** Advance to next readable paragraph
+**Response:** `ttsPlay` (next paragraph) or `ttsEnd`
+
+#### **'ttsStop'** — Stop Text-to-Speech
+```json
+{
+  "route": "ttsStop"
+}
+```
+**Action:** Halt TTS playback
+**Response:** None
+
+---
+
+### JavaScript → Dart Routes
+
+#### **'setState'** — Location Changed
+```json
+{
+  "route": "setState",
+  "data": {
+    "startCfi": "epubcfi(/6/4[chap1]!/4/2,/1:0,/1:50)",
+    "breadcrumb": "Chapter 1 > Introduction",
+    "chapterFileName": "chapter_01.xhtml",
+    "chapterCurrentPage": 3,
+    "chapterTotalPage": 15
+  }
+}
+```
+**Frequency:** Every page change
+**Use:** Update UI (page number, breadcrumb, etc.)
+
+#### **'loadDone'** — Reader Ready
+```json
+{
+  "route": "loadDone"
+}
+```
+**Frequency:** Once (after initial load)
+**Use:** Hide loading indicator, enable buttons
+
+#### **'saveLocation'** — Location Data
+```json
+{
+  "route": "saveLocation",
+  "data": "location-serialized-data"
+}
+```
+**Frequency:** Once (after location generation)
+**Use:** Cache location for restoration
+
+#### **'ttsPlay'** — Text Ready for Speech
+```json
+{
+  "route": "ttsPlay",
+  "data": "This is the paragraph text to be spoken aloud..."
+}
+```
+**Frequency:** Every paragraph (TTS mode)
+**Use:** Feed text to TTS engine
+
+#### **'ttsEnd'** — TTS Complete
+```json
+{
+  "route": "ttsEnd"
+}
+```
+**Frequency:** Once (at book end during TTS)
+**Use:** Stop playback, show completion message
+
+#### **'ttsStop'** — TTS Interrupted
+```json
+{
+  "route": "ttsStop"
+}
+```
+**Frequency:** On orientation change during TTS
+**Use:** Resume TTS after page recalculation
+
+#### **'setSearchResultList'** — Search Results
+```json
+{
+  "route": "setSearchResultList",
+  "data": {
+    "searchResultList": [
+      {
+        "cfi": "epubcfi(/6/4...)",
+        "excerpt": "...matching text...",
+        // additional metadata
+      },
+      // ... more results
+    ]
+  }
+}
+```
+**Frequency:** Once per search
+**Use:** Display results in UI
+
+---
+
+## Development Setup
+
+### Prerequisites
+
+```
+Node.js: v18+
+npm or yarn
+```
+
+### Installation
+
+```bash
+# Clone repository
+cd /Volumes/Transcend/GitHub/NovelGlide-EpubRenderer
+
+# Install dependencies
+npm install
+
+# or
+yarn install
+```
+
+### Development Server
+
+```bash
+# Start webpack dev server (hot reload)
+npm run dev
+
+# Visit: http://localhost:8080
+```
+
+**Features:**
+- 🔄 **Hot reload** on file change
+- 📊 **Source maps** for debugging
+- 🎨 **SASS compilation**
+- 📦 **TypeScript** transpilation
+
+### Project Configuration
+
+**TypeScript** (`tsconfig.json`):
+- Target: ES2020
+- Module: ES6
+- Strict mode: enabled
+
+**Webpack** (`webpack.config.js`):
+- Entry: `src/index.js`
+- Output: `dist/index.js`
+- Loaders: Babel, TypeScript, SASS
+- Plugins: HtmlWebpackPlugin, MiniCssExtractPlugin
+
+### Code Structure
+
+**Main Entry:**
+```javascript
+// src/index.js
+window.readerApi = ReaderApi.getInstance();
+window.communicationService = CommunicationService.getInstance();
+window.ttsService = TtsService.getInstance();
+window.searchService = SearchService.getInstance();
+```
+
+**Adding New Service:**
+1. Create service class with `getInstance()` singleton
+2. Register routes in `CommunicationService`
+3. Export in `index.js`
+
+**Example:**
+```typescript
+// src/services/MyService.ts
+export class MyService {
+  constructor() {
+    CommunicationService.register('myRoute', this.handle.bind(this));
+  }
+  
+  handle(data: any): void {
+    // Process request
+    CommunicationService.send('myResponse', result);
+  }
+  
+  static getInstance(): MyService {
+    window.myService ??= new MyService();
+    return window.myService;
+  }
+}
+```
+
+---
+
+## Build & Deployment
+
+### Production Build
+
+```bash
+# Build optimized version
+npm run build
+
+# Output: dist/
+#   ├── index.html
+#   ├── index.js (minified)
+#   └── index.css (minified)
+```
+
+**Optimizations:**
+- ✅ **Minification** (JavaScript, CSS)
+- ✅ **Tree shaking** (unused code removal)
+- ✅ **Source maps** (for debugging)
+- ✅ **ES5 compatibility** (older devices)
+
+### Deployment to Flutter
+
+**Copy built files:**
+```bash
+# Copy dist/ to Flutter assets
+cp -r dist/* /Volumes/Transcend/GitHub/novelglide-flutter/assets/renderer/
+```
+
+**Files needed in Flutter:**
+```
+assets/renderer/
+├── index.html
+├── index.js
+└── index.css
+```
+
+**Loading in Flutter:**
+```dart
+// In reader_server_repository_impl.dart
+const String rendererAssetPath = 'assets/renderer/index.html';
+```
+
+### Updating EPUB.js
+
+The project uses `epub.js` v0.3.93. To update:
+
+```bash
+# Update to latest
+npm update epubjs
+
+# Check compatibility
+npm test
+```
+
+---
+
+## Integration with Flutter
+
+### Communication Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Flutter App                          │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │         ReaderScreen (UI)                        │  │
+│  │  - Page number, breadcrumb, buttons              │  │
+│  │  - Search results, TTS controls                  │  │
+│  └──────────────────────────────────────────────────┘  │
+│                       ↕                                  │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │      ReaderCoreWebViewRepositoryImpl              │  │
+│  │  - Navigation (next, prev, goto)                 │  │
+│  │  - Styling (fontSize, color, etc.)              │  │
+│  │  - Search, TTS                                   │  │
+│  └──────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
+                      ↕ (WebView channel)
+┌──────────────────────────────────────────────────────────┐
+│            WebViewController (Native)                    │
+│                                                          │
+│  - Hosts: http://localhost:8080                         │
+│  - JavaScript bridge for postMessage                    │
+└──────────────────────────────────────────────────────────┘
+                      ↕ (HTTP)
+┌──────────────────────────────────────────────────────────┐
+│        Local Web Server (Shelf, Dart)                   │
+│                                                          │
+│  - Serves assets: HTML, CSS, JS, fonts, images          │
+│  - Routes requests to appropriate files                 │
+└──────────────────────────────────────────────────────────┘
+                      ↕ (HTTP)
+┌──────────────────────────────────────────────────────────┐
+│   NovelGlide-EpubRenderer (This Web App)                 │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │         ReaderApi (EPUB.js)                      │  │
+│  │  - Book rendering, pagination                    │  │
+│  │  - Navigation logic                              │  │
+│  │  - Styling application                           │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │      CommunicationService                        │  │
+│  │  - Route dispatch (route → callback)             │  │
+│  │  - Message serialization                         │  │
+│  │  - Bidirectional messaging                       │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  Services: Search, TTS, Utils                    │  │
+│  └──────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Key Integration Points
+
+**1. Initialization (Flutter)**
+```dart
+// In reader_core_webview_repository_impl.dart
+await _dataSource.loadPage(serverUri);  // Load index.html
+
 _dataSource.send(ReaderWebMessageDto(
-  route: 'goto',
-  data: cfiOrPageIdentifier,
-));
-
-// JavaScript → Dart (via channel)
-_dataSource.onSaveLocation.listen((location) {
-  _cacheRepository.store(bookIdentifier, location);
-});
-```
-
-**Lifecycle:**
-1. Initialize server with book content
-2. Load HTML rendering page with server URL
-3. JavaScript pagination engine loads chapters
-4. Two-way communication via postMessage API
-5. Save location before navigation
-6. Stop server when done
-
----
-
-### 5. **HTML Parser Implementation** — Lightweight Fallback
-
-**File:** `lib/features/reader/data/repositories/reader_core_html_repository_impl.dart`
-
-Pure Dart implementation without WebView.
-
-**Approach:**
-- Parse HTML documents directly
-- Extract text content
-- Handle pagination at Dart level
-- Use StreamControllers for state management
-
-**Advantages:**
-- No native WebView dependency
-- Lightweight, fast
-- Good for simple, text-heavy documents
-- Easier to test
-
-**Limitations:**
-- Limited CSS support
-- No complex layouts
-- No JavaScript interactivity
-
-**State Management:**
-```dart
-// Main state stream
-final _setStateStreamController = StreamController<ReaderSetStateData>();
-
-// Fires when page changes
-_setStateStreamController.add(ReaderSetStateData(
-  breadcrumb: '...',
-  chapterIdentifier: '...',
-  startCfi: '',  // Can be populated with CFI
-  chapterCurrentPage: 1,
-  chapterTotalPage: 10,
-  content: htmlContent,
-  atStart: true,
-  atEnd: false,
+  route: 'main',
+  data: <String, String?>{
+    'destination': pageIdentifier,
+    'savedLocation': savedLocation,
+  },
 ));
 ```
 
----
-
-## EPUB Rendering Pipeline
-
-### Complete Flow from File to Screen
-
-```
-1. USER SELECTION
-   └─ "Open book.epub"
-
-2. EPUB LOADING (Isolate)
-   ├─ File read (non-blocking)
-   ├─ ZIP extraction (EPUB is ZIP)
-   └─ Parse package.opf metadata
-   └─ EpubBookLoaderResult emitted
-
-3. CONTENT INITIALIZATION
-   ├─ EpubContentParser.parsePageList()
-   │  └─ Extract spine order from package.opf
-   ├─ Determine starting page
-   │  ├─ Use CFI if restoring bookmark
-   │  ├─ Use pageIdentifier if provided
-   │  └─ Otherwise use first page
-   └─ Load page content
-
-4. RENDERING ENGINE SELECTION
-   ├─ WebView? → ReaderCoreWebViewRepositoryImpl
-   │  ├─ Start local server
-   │  ├─ Serve assets (HTML/CSS/fonts/images)
-   │  ├─ Load renderer HTML
-   │  └─ JavaScript pagination engine
-   └─ HTML Parser? → ReaderCoreHtmlRepositoryImpl
-      ├─ Parse HTML → DOM
-      ├─ Extract text → ReaderSetStateData
-      └─ Emit via StreamController
-
-5. PAGE RENDERING
-   ├─ WebView: Browser engine handles layout
-   └─ HTML Parser: Dart text extraction + Flutter rendering
-
-6. INTERACTION HANDLING
-   ├─ Next/Previous Page
-   ├─ Search (chapter or book-wide)
-   ├─ Bookmark save (with CFI)
-   ├─ TTS playback
-   └─ UI updates from streams
-
-7. LOCATION PERSISTENCE
-   ├─ Save current location to LocationCache
-   ├─ Store CFI string
-   └─ Restore on next app launch
-```
-
-### Spine and Page Ordering
-
-EPUB structure:
-```xml
-<!-- package.opf -->
-<spine>
-  <itemref idref="ncx" />
-  <itemref idref="cover" />
-  <itemref idref="chapter1" />
-  <itemref idref="chapter2" />
-  ...
-</spine>
-
-<manifest>
-  <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" />
-  <item id="chapter1" href="chapter_01.xhtml" media-type="application/xhtml+xml" />
-  ...
-</manifest>
-```
-
-**Processing:**
+**2. Page Navigation**
 ```dart
-// EpubContentParser.parsePageList()
-return spine.items
-  .map((spineItem) {
-    final item = manifest.items
-      .firstWhere((item) => item.id == spineItem.idref);
-    return BookPage(identifier: item.href);
-  })
-  .toList();
-
-// Result: List<BookPage> = [
-//   BookPage(identifier: 'cover.xhtml'),
-//   BookPage(identifier: 'chapter_01.xhtml'),
-//   BookPage(identifier: 'chapter_02.xhtml'),
-//   ...
-// ]
-```
-
----
-
-## CFI System
-
-### What is CFI?
-
-**Canonical Fragment Identifiers (CFI)** are the EPUB standard for pointing to specific locations within a book.
-
-**Format:**
-```
-epubcfi(/6/4[chap1]!/4/2,/1:0,/1:100)
- └─────────┬──────────────────────────────┘
-       CFI Expression
-```
-
-**Components:**
-- `epubcfi()` — Required wrapper
-- `/6/4[chap1]` — Navigate to element in OPF
-- `!/4/2` — After spine item, navigate in content document
-- `,/1:0,/1:100` — Text range (from offset 0, 100 chars)
-
-### CFI in NovelGlide
-
-**Current Implementation Status (Phase 5 - 2026-02-25):**
-
-✅ **Completed:**
-- CFI Parser (converts string → CFI object)
-- CFI Resolver (navigates to CFI location)
-- On-demand CFI generation (no pre-computation)
-- Bookmark save/restore with CFI
-- LocationCache integration
-
-**Architecture:**
-
-```
-Bookmark System
-    ├─ Save Bookmark
-    │  ├─ Get current node
-    │  ├─ Generate CFI: CfiResolver.generateFromNode()
-    │  ├─ Store: { cfi: "epubcfi(...)", excerpt: "..." }
-    │  └─ Persist to database
-    │
-    └─ Restore Bookmark
-       ├─ Load CFI string
-       ├─ Resolve: CfiResolver.tryResolve(cfi)
-       ├─ Navigate to resolved element
-       ├─ Fallback to page if CFI fails
-       └─ Update LocationCache
-```
-
-**Performance:**
-- CFI generation: ~1-2ms per bookmark
-- CFI resolution: ~1-5ms per jump
-- Negligible impact on performance
-
-**Integration Points:**
-
-1. **Saving Location (LocationCacheRepository):**
-   ```dart
-   // In WebView JavaScript bridge
-   _dataSource.onSaveLocation.listen((location) async {
-     // location contains CFI string
-     await _cacheRepository.store(bookIdentifier, location);
-   });
-   ```
-
-2. **Restoring Location (init method):**
-   ```dart
-   Future<void> init({
-     required String bookIdentifier,
-     String? pageIdentifier,
-     String? cfi,  // ← Can pass CFI
-   }) async {
-     await _serverRepository.start(bookIdentifier);
-     final savedLocation = await _cacheRepository.get(bookIdentifier);
-     
-     _dataSource.send(ReaderWebMessageDto(
-       route: 'main',
-       data: <String, String?>{
-         'destination': cfi ?? savedLocation ?? pageIdentifier,
-       },
-     ));
-   }
-   ```
-
-3. **Bookmark Storage (Database):**
-   ```dart
-   class BookmarkData {
-     String id;
-     String bookIdentifier;
-     String cfi;          // ← CFI string
-     String excerpt;      // ← Context text
-     DateTime createdAt;
-     
-     // Static CFI format for EPUB standard compatibility
-     static const String cfiPrefix = 'epubcfi(';
-   }
-   ```
-
-### CFI Best Practices
-
-**When to use CFI:**
-- ✅ Saving bookmarks
-- ✅ Restoring reading position
-- ✅ Sharing book locations
-- ✅ Implementing highlighter/notes
-
-**When NOT needed:**
-- ❌ Page-to-page navigation (use pageIdentifier)
-- ❌ Chapter selection (use href)
-
-**Generation Strategy:**
-- **On-demand:** Generate CFI only when saving
-- **Not pre-computed:** Skip pre-computing all CFIs (too slow)
-- **Lazy evaluation:** Compute as needed for performance
-
----
-
-## Bookmarking & Location Management
-
-### LocationCacheRepository
-
-**File:** `lib/features/reader/data/repositories/reader_location_cache_repository_impl.dart`
-
-Manages persistent storage of reading position.
-
-**Data Stored:**
-- Book identifier
-- Current page/CFI location
-- Timestamp
-- Any reader state
-
-**Interface:**
-```dart
-// Save current location
-Future<void> store(String bookIdentifier, String location) async
-
-// Retrieve last location
-Future<String?> get(String bookIdentifier) async
-
-// Clear location
-Future<void> clear(String bookIdentifier) async
-```
-
-**Implementation Details:**
-- Uses `shared_preferences` for simple caching
-- Can be extended to use database for richer data
-- Location format: CFI string for compatibility
-
-**Lifecycle:**
-
-```
-User opens book
-    ↓
-LocationCache.get(bookIdentifier)
-    ↓
-Initialize with saved CFI
-    ↓
-[User reads...]
-    ↓
-On navigation event:
-LocationCache.store(bookIdentifier, currentCfi)
-    ↓
-[User closes app]
-    ↓
-Next session:
-LocationCache.get(bookIdentifier) → restore CFI
-```
-
-### Bookmark Data Model
-
-```dart
-class BookmarkData {
-  final String id;           // Unique identifier
-  final String bookId;       // Book reference
-  final String cfi;          // EPUB CFI location
-  final String excerpt;      // Context text (~100 chars)
-  final DateTime createdAt;
-  
-  // Optional fields
-  final String? note;        // User annotation
-  final int? color;          // Highlight color
-}
-```
-
-**Example Usage:**
-```dart
-// Save bookmark with CFI
-final bookmark = BookmarkData(
-  id: uuid.v4(),
-  bookId: 'book-123',
-  cfi: 'epubcfi(/6/4[chap1]!/4/2,/1:50,/1:150)',
-  excerpt: '...This is the bookmarked text content...',
-  createdAt: DateTime.now(),
-);
-
-// Store to database
-await bookmarkRepository.save(bookmark);
-
-// Later: Jump to bookmark
-await readerCore.goto(cfi: bookmark.cfi);
-```
-
----
-
-## Search System
-
-### Search Architecture
-
-**Components:**
-- `ReaderSearchRepository` — Search execution
-- `ReaderSearchResultData` — Search result model
-- Use cases: `SearchInCurrentChapterUseCase`, `SearchInWholeBookUseCase`
-
-### SearchResultData Model
-
-```dart
-class ReaderSearchResultData {
-  final String destination;      // Page/chapter to navigate to
-  final String excerpt;          // Context snippet (~200 chars)
-  final int targetIndex;         // Position in excerpt
-}
-```
-
-### Search Implementation
-
-**Current Chapter Search:**
-```dart
-Future<void> searchInCurrentChapter(String query) async {
-  final List<ReaderSearchResultData> resultList = [];
-  
-  // Normalize whitespace
-  final String content = 
-    _htmlContent.textContent.replaceAll(RegExp(r'\s+'), ' ');
-  
-  // Find all occurrences
-  int index = 0;
-  while ((index = content.indexOf(query, index)) != -1) {
-    final int start = max(0, index - 100);
-    final int end = min(index + 100, content.length);
-    
-    resultList.add(ReaderSearchResultData(
-      destination: _htmlContent.pageIdentifier,
-      excerpt: content.substring(start, end),
-      targetIndex: index - start,
-    ));
-    
-    index += query.length;
-  }
-  
-  _searchResultStreamController.add(resultList);
-}
-```
-
-**Whole Book Search:**
-```dart
-Future<void> searchInWholeBook(String query) async {
-  final List<ReaderSearchResultData> resultList = [];
-  
-  // Iterate through all pages
-  for (BookPage page in _pageList) {
-    final BookHtmlContent content = 
-      await _loadContent(pageIdentifier: page.identifier);
-    
-    resultList.addAll(
-      await _searchInContent(content, query)
-    );
-  }
-  
-  _searchResultStreamController.add(resultList);
-}
-```
-
-**Performance Considerations:**
-- Text normalization: `replaceAll(RegExp(r'\s+'), ' ')` removes extra whitespace
-- Regex matching: Pre-compile patterns if searching frequently
-- Result caching: Cache full-book search results for 5 minutes
-- Pagination: Display results in batches (not all 10,000 at once)
-
-### Search Highlighting (UI Layer)
-
-The search result's `targetIndex` is used to highlight the found text in the UI:
-
-```dart
-// In reader_search_result_list.dart
-Text(
-  result.excerpt,
-  style: TextStyle(
-    // Highlight found text
-  ),
-)
-
-// Calculate highlight position
-final int start = result.targetIndex;
-final int end = start + query.length;
-// Apply TextSpan styling
-```
-
----
-
-## Reader Core Implementations
-
-### Comparison Table
-
-| Feature | WebView | HTML Parser |
-|---------|---------|-------------|
-| CSS Support | Full | Limited |
-| JavaScript | Yes | No |
-| Complex Layouts | ✅ | ⚠️ |
-| Performance | Good | Excellent |
-| Resources | High | Low |
-| Testing | Harder | Easier |
-| Custom Fonts | ✅ | ✅ |
-| State Restoration | CFI | Page ID |
-
-### Selecting the Right Engine
-
-**Use WebView when:**
-- Complex EPUB with advanced CSS
-- Interactive elements (buttons, forms)
-- Publisher-specific formatting
-- Rich typography
-
-**Use HTML Parser when:**
-- Simple text-based books
-- Limited device resources
-- Development/testing
-- Linear reading focus
-
-### Switching Between Engines
-
-Both implementations follow the same `ReaderCoreRepository` interface. Selection happens at initialization:
-
-```dart
-// In reader_setup_dependencies.dart
-final ReaderCoreRepository _createReaderCoreRepository() {
-  final useWebView = _shouldUseWebView();  // User preference
-  
-  if (useWebView) {
-    return ReaderCoreWebViewRepositoryImpl(
-      controller,
-      dataSource,
-      serverRepository,
-      cacheRepository,
-    );
-  } else {
-    return ReaderCoreHtmlRepositoryImpl(
-      bookRepository,
-    );
-  }
-}
-```
-
----
-
-## Local Web Server
-
-### ServerRepository Architecture
-
-**File:** `lib/features/reader/data/repositories/reader_server_repository_impl.dart`
-
-Hosts EPUB content locally to avoid file:// security restrictions in WebView.
-
-**Why Local Server?**
-- WebView blocks local file:// resources by default (CORS)
-- Some platforms don't allow WebView access to app directories
-- Server provides HTTP protocol (more reliable)
-- Easy to implement custom routing
-
-**Flow:**
-```
-1. Initialize: ServerRepository.start(bookIdentifier)
-   └─ Shelf server on http://localhost:8080
-   
-2. Register routes:
-   ├─ GET /book/{chapter}.xhtml → Serve HTML
-   ├─ GET /assets/{image} → Serve images
-   ├─ GET /fonts/{font} → Serve fonts
-   └─ GET /styles/{css} → Serve stylesheets
-
-3. WebView loads: http://localhost:8080/index.html
-   ├─ JavaScript renderer
-   ├─ Dynamic chapter loading
-   └─ Pagination engine
-
-4. Cleanup: ServerRepository.stop()
-   └─ Free port, cleanup resources
-```
-
-**Implementation Notes:**
-- Uses Shelf framework (pure Dart HTTP server)
-- Single-threaded, non-blocking
-- Port auto-selection (if 8080 taken)
-- Automatic cleanup on dispose
-
----
-
-## Font Management
-
-### Font Loading System
-
-**Key Files:**
-- `epub_content_parser.dart` — Extracts fonts from EPUB
-- CSS font-face declarations processed during stylesheet loading
-
-**How Fonts Work:**
-
-1. **EPUB Font Files:**
-   ```
-   EPUB/
-   └─ FONTS/
-      ├─ georgia.ttf
-      ├─ opensan.woff
-      └─ serif.otf
-   ```
-
-2. **CSS Declaration:**
-   ```css
-   @font-face {
-     font-family: "Georgia";
-     src: url("../fonts/georgia.ttf");
-   }
-   ```
-
-3. **Extraction in Parser:**
-   ```dart
-   Future<Map<String, ImageFile>> loadImages(
-     epub.EpubBook epubBook,
-     String href,
-     List<String> fontPathList,
-   ) async {
-     // Process similar to images
-     // Extract bytes from EPUB
-     // Make available via HTTP server
-   }
-   ```
-
-4. **Serving via Local Server:**
-   ```
-   Browser requests: GET /fonts/georgia.ttf
-   Server resolves: epub → bytesFromZip → HTTP response
-   Browser renders: CSS @font-face loads successfully
-   ```
-
-### Font Optimization
-
-**WebView Limitations:**
-- Some fonts (WOFF2, variable fonts) may not load
-- Large font files increase memory usage
-- Solution: Subset fonts to required characters
-
-**Best Practices:**
-- Use standard formats: TTF, OTF, WOFF
-- Provide fallback system fonts
-- Test font loading on target devices
-- Consider font file size impact
-
----
-
-## Performance Optimization
-
-### Caching Strategy
-
-**1. Book Content Caching**
-```dart
-// In BookRepository
-enableBookCache()  // Cache chapter content in memory
-disableBookCache() // Free memory when reader closes
-
-// Benefit: Avoid re-parsing same chapter multiple times
-// Trade-off: Higher memory usage for large books
-```
-
-**2. Location Cache**
-```dart
-// Fast persistence of reading position
-await _cacheRepository.store(bookIdentifier, cfi)
-
-// Benefits:
-// - Instant restore on app relaunch
-// - Prevents searching for location
-// - Works offline
-```
-
-**3. LRU Cache (Optional)**
-```dart
-// In reader configuration
-final lruCache = LruCache<String, BookHtmlContent>(
-  maxSize: 10,  // Keep last 10 chapters in memory
-);
-```
-
-### Page Loading Optimization
-
-**WebView:**
-```
-Request page N
-    ↓
-JavaScript pagination engine
-    ├─ Measure element heights
-    ├─ Calculate text breaks
-    ├─ Render paginated view
-    └─ Ready to display: ~200-500ms
-```
-
-**HTML Parser:**
-```
-Request page N
-    ↓
-Parse HTML → DOM
-    ↓
-Extract text from DOM
-    ↓
-Emit ReaderSetStateData: ~10-50ms
-```
-
-### Memory Management
-
-**EPUB Size Impact:**
-- Small book (< 5MB): Minimal impact
-- Medium book (5-50MB): Monitor memory
-- Large book (> 50MB): Use caching strategy
-
-**Recommendations:**
-- Cache only current + adjacent pages
-- Clear images from memory after rendering
-- Use image lazy-loading in WebView
-- Monitor memory via Flutter DevTools
-
----
-
-## Development Guide
-
-### Setup Instructions
-
-1. **Clone and branch:**
-   ```bash
-   cd /Volumes/Transcend/GitHub/novelglide-flutter
-   git checkout reader_engine
-   git pull origin reader_engine
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   flutter pub get
-   ```
-
-3. **Build and run:**
-   ```bash
-   flutter run -d <device>
-   ```
-
-### Common Development Tasks
-
-### Adding a New Feature to Reader
-
-**Example: Custom text selection color**
-
-1. **Update domain interface:**
-   ```dart
-   // reader_core_repository.dart
-   set textSelectionColor(Color color);
-   ```
-
-2. **Implement in both engines:**
-   ```dart
-   // reader_core_webview_repository_impl.dart
-   @override
-   set textSelectionColor(Color color) {
-     _dataSource.send(ReaderWebMessageDto(
-       route: 'setSelectionColor',
-       data: color.value.toRadixString(16),
-     ));
-   }
-   
-   // reader_core_html_repository_impl.dart
-   @override
-   set textSelectionColor(Color color) {
-     // Update text selection style in HTML renderer
-   }
-   ```
-
-3. **Use in presentation layer:**
-   ```dart
-   // reader_screen.dart
-   _readerCore.textSelectionColor = Colors.yellow;
-   ```
-
-### Debugging WebView
-
-**Enable debugging:**
-```dart
-// In reader_core_webview.dart
-if (defaultTargetPlatform == TargetPlatform.android) {
-  WebView.platform = SurfaceAndroidWebView();
-}
-
-// Android: Use Chrome DevTools
-// iOS: Use Safari Web Inspector
-```
-
-**View JavaScript errors:**
-- Android: `adb logcat | grep chromium`
-- iOS: Safari → Develop → Select device
-
-### Testing EPUB Files
-
-**Test cases:**
-```
-✅ Simple EPUB (text only)
-✅ EPUB with images
-✅ EPUB with custom fonts
-✅ EPUB with complex CSS
-✅ Large EPUB (100MB+)
-✅ EPUB with unusual structure (missing files, etc.)
-```
-
-**Add test EPUB:**
-```bash
-# Place in assets/samples/
-assets/samples/
-├─ simple.epub
-├─ complex.epub
-└─ large.epub
-```
-
----
-
-## Testing
-
-### Unit Tests
-
-**Test structure:**
-```
-test/
-├── features/
-│   └── reader/
-│       ├── domain/
-│       │   └── repositories/
-│       │       └── reader_core_repository_test.dart
-│       └── data/
-│           ├── repositories/
-│           │   ├── reader_core_html_repository_test.dart
-│           │   └── reader_location_cache_repository_test.dart
-│           └── data_sources/
-│               └── reader_webview_data_source_test.dart
-└── core/
-    └── html_parser/
-        └── html_parser_test.dart
-```
-
-**Example test:**
-```dart
-group('ReaderCoreHtmlRepositoryImpl', () {
-  late ReaderCoreHtmlRepositoryImpl repository;
-  late MockBookRepository mockBookRepository;
-
-  setUp(() {
-    mockBookRepository = MockBookRepository();
-    repository = ReaderCoreHtmlRepositoryImpl(mockBookRepository);
-  });
-
-  test('init loads content and emits state', () async {
-    // Arrange
-    const bookId = 'book-123';
-    const pageId = 'chapter-1.xhtml';
-    
-    when(mockBookRepository.getContent(bookId, pageIdentifier: pageId))
-      .thenAnswer((_) async => BookHtmlContent(
-        pageIdentifier: pageId,
-        textContent: 'Chapter content...',
-        pageList: [],
-      ));
-
-    // Act
-    final states = <ReaderSetStateData>[];
-    repository.onSetState.listen(states.add);
-    await repository.init(bookIdentifier: bookId, pageIdentifier: pageId);
-
-    // Assert
-    expect(states, isNotEmpty);
-    expect(states.first.chapterIdentifier, pageId);
-  });
+// Dart requests next page
+_dataSource.send(ReaderWebMessageDto(route: 'nextPage'));
+
+// JavaScript responds
+CommunicationService.send('setState', {...});
+
+// Flutter receives and updates UI
+_dataSource.onSetState.listen((state) {
+  // Update page number, breadcrumb, etc.
 });
 ```
 
-### Integration Tests
-
-**File:** `integration_test/reader_integration_test.dart`
-
+**3. Search**
 ```dart
-group('Reader Integration Tests', () {
-  testWidgets('Open book and navigate pages', (WidgetTester tester) async {
-    // Load app
-    await tester.pumpWidget(const MyApp());
+// Dart initiates search
+_dataSource.send(ReaderWebMessageDto(
+  route: 'searchInWholeBook',
+  data: 'query',
+));
 
-    // Open book
-    await tester.tap(find.byIcon(Icons.book));
-    await tester.pumpAndSettle();
+// JavaScript returns results
+CommunicationService.send('setSearchResultList', [...]);
 
-    // Navigate next page
-    await tester.tap(find.byIcon(Icons.navigate_next));
-    await tester.pumpAndSettle();
-
-    // Verify page changed
-    expect(find.text('Chapter 2'), findsOneWidget);
-  });
+// Flutter receives and displays
+_dataSource.onSetSearchResultList.listen((results) {
+  // Display search UI
 });
 ```
 
-### Running Tests
+### Debugging
 
+**Enable WebView debugging:**
+
+**Android:**
 ```bash
-# Unit tests
-flutter test
+# View WebView console logs
+adb logcat | grep chromium
+```
 
-# Specific test file
-flutter test test/features/reader/...
+**iOS:**
+```
+Safari → Develop → Select device → Select renderer page
+```
 
-# With coverage
-flutter test --coverage
-lcov --list coverage/lcov.info
-
-# Integration tests
-flutter test integration_test/
+**In Web App:**
+```typescript
+// Fallback console logging
+if (!this.channel) {
+  console.log(route, data);  // Logs to DevTools
+}
 ```
 
 ---
@@ -1188,228 +926,278 @@ flutter test integration_test/
 
 ### Common Issues
 
-#### 1. EPUB Won't Load
+#### 1. WebView Shows Blank Page
 
-**Symptoms:** File picker works, but reader stays blank
+**Symptoms:** White screen, no content
 
 **Diagnosis:**
 ```bash
-# Check file exists
-ls -la /path/to/book.epub
+# Check if server is running
+curl http://localhost:8080/index.html
 
-# Verify EPUB structure
-unzip -l book.epub | head -20
+# Check WebView logs
+adb logcat | grep webview
 ```
 
 **Solutions:**
-```dart
-// Add logging
-LogSystem.info('Loading EPUB: $filePath');
+```typescript
+// In ReaderApi.main()
+console.log('Book loaded:', this.book);
+console.log('Rendition ready:', this.rendition);
 
-// Check EPUB validity
-try {
-  final epub = await epubx.EpubBook.readBook(file.readAsBytes());
-  if (epub.Schema?.Package == null) {
-    LogSystem.error('Invalid EPUB: missing package.opf');
-  }
-} catch (e) {
-  LogSystem.error('EPUB load error: $e');
+// Check if EPUB file exists
+// Server must serve book.epub at /book.epub
+```
+
+**Common causes:**
+- ❌ `book.epub` not found at expected path
+- ❌ Server not running or wrong port
+- ❌ EPUB file corrupted
+- ❌ JavaScript errors in console
+
+#### 2. Navigation Doesn't Work
+
+**Symptoms:** Next/Previous buttons don't respond
+
+**Debug:**
+```typescript
+// In ReaderApi.nextPage()
+console.log('Current page:', this.currentPage);
+console.log('Total page:', this.totalPage);
+console.log('Is scrolling:', this.isScrolling);
+
+// Check if rendition is ready
+if (!this.rendition) {
+  console.error('Rendition not initialized');
 }
 ```
 
-#### 2. WebView Not Rendering
-
-**Symptoms:** White screen, no content visible
-
-**Debug Steps:**
-```dart
-// 1. Check server is running
-final Uri uri = await _serverRepository.start(bookId);
-print('Server URL: $uri'); // Should print http://localhost:8080
-
-// 2. Verify file permissions (Android)
-// AndroidManifest.xml must have:
-// <uses-permission android:name="android.permission.INTERNET" />
-
-// 3. Check WebView logs
-adb logcat | grep -i webview
-
-// 4. Verify JavaScript bridge
-_dataSource.send(...); // Check if reaches JavaScript
-```
+**Causes:**
+- ❌ `isScrolling` flag stuck (true)
+- ❌ `'relocated'` event not firing
+- ❌ EPUB has unusual structure
 
 #### 3. Search Returns No Results
 
-**Symptoms:** Query matches text, but no results found
-
-**Check:**
-```dart
-// 1. Verify text content extraction
-final String content = htmlContent.textContent;
-print('Content length: ${content.length}');
-print('Contains query: ${content.contains(query)}');
-
-// 2. Check case sensitivity
-final String normalizedContent = content.toLowerCase();
-final String normalizedQuery = query.toLowerCase();
-
-// 3. Whitespace issues
-final String cleanedContent = 
-  content.replaceAll(RegExp(r'\s+'), ' ');
-print('Cleaned: ${cleanedContent.substring(0, 100)}...');
-```
-
-#### 4. CFI Resolution Fails
-
-**Symptoms:** Jump to bookmark doesn't work, falls back to page
+**Symptoms:** Search works but shows nothing
 
 **Debug:**
-```dart
-// 1. Verify CFI format
-final cfi = 'epubcfi(/6/4[chap1]!/4/2,/1:50,/1:150)';
-if (!cfi.startsWith('epubcfi(')) {
-  LogSystem.error('Invalid CFI format');
-}
-
-// 2. Check element exists
-try {
-  final element = await CfiResolver.tryResolve(cfi);
-  if (element == null) {
-    LogSystem.warn('CFI target element not found, using fallback');
-  }
-} catch (e) {
-  LogSystem.error('CFI resolution error: $e');
-}
-
-// 3. Verify spine matches
-final spine = await bookRepository.getChapterList(bookId);
-print('Spine pages: ${spine.map((c) => c.identifier).toList()}');
+```typescript
+// In SearchService.searchInWholeBook()
+promiseList.forEach((p, i) => {
+  p.then((results) => {
+    console.log(`Spine item ${i}:`, results.length, 'matches');
+  });
+});
 ```
 
-#### 5. High Memory Usage
+**Causes:**
+- ❌ Case-sensitive search (implement case-insensitive)
+- ❌ Special characters in query
+- ❌ Text encoded differently
 
-**Symptoms:** App becomes sluggish, crashes on large books
+**Fix:**
+```typescript
+// Normalize search
+const normalized = q.toLowerCase();
+// Implement fuzzy matching
+```
 
-**Solutions:**
-```dart
-// 1. Clear cache periodically
-_bookRepository.disableBookCache();
+#### 4. TTS Doesn't Work
 
-// 2. Use LRU cache
-final cache = LruCache<String, BookHtmlContent>(maxSize: 5);
+**Symptoms:** TTS menu appears but no audio
 
-// 3. Monitor memory
-import 'dart:developer' as developer;
-developer.Timeline.instantSync('Memory check', arguments: {
-  'bytes': ProcessInfo.currentRss,
-});
+**Debug:**
+```typescript
+// In TtsService.play()
+console.log('Visible nodes:', this.nodeList.length);
+console.log('First node text:', this.nodeList[0]?.textContent);
+```
 
-// 4. Lazy load images
-// In WebView, use native lazy loading
-// <img loading="lazy" src="..." />
+**Causes:**
+- ❌ No visible text nodes found
+- ❌ `TextNodeUtils.isVisible()` too strict
+- ❌ Text content is whitespace-only
+
+#### 5. Performance Issues
+
+**Symptoms:** Slow page turns, laggy scrolling
+
+**Debug:**
+```typescript
+// Measure page turn time
+const start = performance.now();
+await this.nextPage();
+console.log(`Page turn: ${performance.now() - start}ms`);
+```
+
+**Optimization tips:**
+```typescript
+// Debounce scroll events
+private debounce(fn: Function, delay: number) {
+  let timeout;
+  return (...args) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fn(...args), delay);
+  };
+}
+
+// Throttle state updates
+const throttledSync = this.throttle(
+  this.syncState.bind(this), 
+  200
+);
+```
+
+#### 6. Fonts Not Loading
+
+**Symptoms:** Custom fonts appear as fallback
+
+**Debug:**
+```typescript
+// Check if font file is served
+fetch('/fonts/georgia.ttf')
+  .then(r => console.log('Font served:', r.ok))
+  .catch(e => console.error('Font load failed:', e));
+```
+
+**Causes:**
+- ❌ Font files not in local server
+- ❌ CSS @font-face path incorrect
+- ❌ CORS headers missing
+
+---
+
+## Performance Optimization
+
+### Measurement & Profiling
+
+```typescript
+// Measure operation time
+const measure = (name: string, fn: () => void) => {
+  const start = performance.now();
+  fn();
+  const duration = performance.now() - start;
+  console.log(`${name}: ${duration.toFixed(2)}ms`);
+};
+
+measure('nextPage', () => this.nextPage());
+measure('goto', () => this.goto('chapter_02.xhtml'));
+```
+
+### Optimization Strategies
+
+**1. Lazy Load Chapters**
+```typescript
+// Don't load all chapters at startup
+// Load on-demand via goto()
+```
+
+**2. Cache Location Data**
+```typescript
+// EPUB.js caches location data
+// Reuse this.book.locations.save()
+```
+
+**3. Optimize Text Extraction**
+```typescript
+// Cache text nodes instead of recalculating
+private cachedTextNodes: Array<Node> = [];
+
+get textNodeList(): Array<Node> {
+  if (this.cachedTextNodes.length === 0) {
+    this.cachedTextNodes = this.extractTextNodes();
+  }
+  return this.cachedTextNodes;
+}
+```
+
+**4. Debounce State Updates**
+```typescript
+// Don't fire setState on every scroll
+// Batch updates and emit less frequently
+private stateUpdateScheduled = false;
+
+private syncState(location: any) {
+  if (this.stateUpdateScheduled) return;
+  
+  this.stateUpdateScheduled = true;
+  setTimeout(() => {
+    CommunicationService.send('setState', {...});
+    this.stateUpdateScheduled = false;
+  }, 100);
+}
+```
+
+**5. Use Smooth Scroll Sparingly**
+```typescript
+// Smooth scroll is expensive
+// Disable for chapter transitions
+if (doGotoNextChapter) {
+  this.setSmoothScroll(false);
+}
+```
+
+### Memory Management
+
+**Indicators:**
+- 📊 Monitor via Chrome DevTools → Memory
+- ⚠️ Large EPUBs (>50MB) can consume 100MB+ RAM
+
+**Best Practices:**
+```typescript
+// Unload chapters after use
+await item.unload();
+
+// Clear node cache on chapter change
+this.cachedTextNodes = [];
+
+// Use WeakMap for caches
+private weakCache = new WeakMap();
 ```
 
 ---
 
-## API Reference
+## Testing
 
-### ReaderCoreRepository
+### Unit Testing Setup
 
-```dart
-abstract class ReaderCoreRepository {
-  // Initialization
-  Future<void> init({
-    required String bookIdentifier,
-    String? pageIdentifier,
-    String? cfi,
+```bash
+# Add Jest
+npm install --save-dev jest ts-jest
+
+# Create jest.config.js
+module.exports = {
+  preset: 'ts-jest',
+  testEnvironment: 'jsdom',
+};
+```
+
+### Example Test
+
+```typescript
+// __tests__/ReaderApi.test.ts
+describe('ReaderApi', () => {
+  let reader: ReaderApi;
+
+  beforeEach(() => {
+    reader = ReaderApi.getInstance();
   });
 
-  // Navigation
-  Future<void> nextPage();
-  Future<void> previousPage();
-  Future<void> goto({String? pageIdentifier, String? cfi});
+  it('should initialize with a book', async () => {
+    await reader.main({});
+    expect(reader.book).toBeDefined();
+    expect(reader.rendition).toBeDefined();
+  });
 
-  // Search
-  Future<void> searchInCurrentChapter(String query);
-  Future<void> searchInWholeBook(String query);
-
-  // Text-to-Speech
-  void ttsPlay();
-  void ttsNext();
-  void ttsStop();
-
-  // Styling
-  set fontSize(double fontSize);
-  set lineHeight(double lineHeight);
-  set fontColor(Color fontColor);
-  set smoothScroll(bool smoothScroll);
-
-  // Streams
-  Stream<ReaderSetStateData> get onSetState;
-  Stream<String> get onPlayTts;
-  Stream<void> get onStopTts;
-  Stream<void> get onEndTts;
-  Stream<List<ReaderSearchResultData>> get onSetSearchResultList;
-
-  // Cleanup
-  Future<void> dispose();
-}
+  it('should navigate to next page', async () => {
+    const initialPage = reader.currentPage;
+    await reader.nextPage();
+    // Page should change (or reach end)
+    expect(reader.currentPage).not.toBe(initialPage);
+  });
+});
 ```
-
-### ReaderSetStateData
-
-```dart
-class ReaderSetStateData {
-  final String breadcrumb;           // "Chapter 1 > Section A"
-  final String chapterIdentifier;    // "chapter-01.xhtml"
-  final String startCfi;             // "epubcfi(...)"
-  final int chapterCurrentPage;      // 5
-  final int chapterTotalPage;        // 20
-  final BookHtmlContent content;     // Full page content
-  final bool atStart;                // First page of book?
-  final bool atEnd;                  // Last page of book?
-}
-```
-
-### ReaderSearchResultData
-
-```dart
-class ReaderSearchResultData {
-  final String destination;     // Page to navigate to
-  final String excerpt;         // Text snippet with ellipsis
-  final int targetIndex;        // Position in excerpt
-}
-```
-
----
-
-## Future Enhancements
-
-### Planned Features
-
-1. **Advanced CFI Support**
-   - Text ranges for highlighting
-   - Multiple CFI bookmarks per page
-
-2. **Enhanced Search**
-   - Regex search
-   - Case-insensitive toggle
-   - Search history
-
-3. **Performance**
-   - Pre-pagination in background
-   - Adaptive font loading
-   - Parallel page rendering
-
-4. **Annotations**
-   - Highlight system with CFI
-   - Notes with timestamps
-   - Color-coded categories
-
-5. **Accessibility**
-   - Enhanced TTS integration
-   - High contrast modes
-   - Font scaling UI
 
 ---
 
@@ -1417,51 +1205,59 @@ class ReaderSearchResultData {
 
 ### Code Style
 
-- Follow Dart conventions
-- Use meaningful variable names
-- Document public APIs with doc comments
-- Add unit tests for new features
+- Use **TypeScript** for new files
+- Follow **camelCase** for methods/variables
+- Document public methods with JSDoc
+- Use **meaningful names** (not `a`, `b`, `x`)
 
 ### Git Workflow
 
 ```bash
 # Create feature branch
-git checkout -b feature/your-feature reader_engine
+git checkout -b feature/your-feature
 
-# Commit with descriptive messages
-git commit -m "feat: add CFI support for bookmarks"
+# Develop and test
+npm run dev
 
-# Push and open PR
+# Build and verify
+npm run build
+
+# Commit and push
+git commit -m "feat: add new feature"
 git push origin feature/your-feature
 ```
 
-### Review Checklist
+### Pull Request Checklist
 
-- [ ] Code follows style guide
-- [ ] Tests added/updated
-- [ ] Documentation updated
-- [ ] No console warnings
-- [ ] Tested on multiple devices
+- [ ] Code builds without warnings
+- [ ] No console errors
+- [ ] Tested on Android and iOS (if possible)
+- [ ] Documented API changes
+- [ ] Updated README if needed
 
 ---
 
 ## Resources
 
-### Official EPUB Specification
-- [EPUB3 Standard](https://www.w3.org/publishing/epub3/)
-- [CFI Specification](https://idpf.github.io/epub-cfi/epub-cfi.html)
-
 ### Dependencies
-- [epubx/epubx.dart](https://pub.dev/packages/epubx) - EPUB parsing
-- [webview_flutter](https://pub.dev/packages/webview_flutter) - Web rendering
-- [flutter_html](https://pub.dev/packages/flutter_html) - HTML rendering
-- [shelf](https://pub.dev/packages/shelf) - HTTP server
+
+- **[EPUB.js](https://github.com/futurepress/epub.js)** v0.3.93 — EPUB rendering
+- **Webpack** v5 — Build tool
+- **TypeScript** v5 — Language
+- **Babel** v7 — ES5 compatibility
+- **SASS** v1 — Styling
+
+### Documentation
+
+- [EPUB.js Docs](https://futurepress.github.io/epub.js/)
+- [EPUB3 Spec](https://www.w3.org/publishing/epub3/)
+- [WebView JavaScript Bridge](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
 
 ### Related Files
-- EPUB Book Loader: `epub_book_loader.dart`
-- Content Parser: `epub_content_parser.dart`
-- Reader UI: `lib/features/reader/presentation/pages/reader_screen.dart`
-- Test Samples: `assets/samples/`
+
+- **Flutter Integration:** `novelglide-flutter/lib/features/reader/`
+- **Server Setup:** `novelglide-flutter/lib/features/reader/data/repositories/reader_server_repository_impl.dart`
+- **WebView DataSource:** `novelglide-flutter/lib/features/reader/data/data_sources/reader_webview_data_source_impl.dart`
 
 ---
 
@@ -1473,4 +1269,5 @@ Part of the NovelGlide project. See LICENSE file for details.
 
 **Last Updated:** 2026-02-25  
 **Maintained by:** NovelGlide Development Team  
-**Status:** Active Development (Phase 5 - Testing & Polish)
+**Framework:** TypeScript + Webpack + EPUB.js  
+**Status:** Active Development
