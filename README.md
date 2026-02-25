@@ -2,27 +2,6 @@
 
 Welcome to the **NovelGlide EPUB Renderer** — a sophisticated, multi-layered system for rendering and interacting with EPUB books across Flutter platforms. This document provides comprehensive technical documentation for developers working with the EPUB rendering pipeline.
 
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Core Components](#core-components)
-4. [EPUB Rendering Pipeline](#epub-rendering-pipeline)
-5. [CFI (Canonical Fragment Identifiers) System](#cfi-system)
-6. [Bookmarking & Location Management](#bookmarking--location-management)
-7. [Search System](#search-system)
-8. [Reader Core Implementations](#reader-core-implementations)
-9. [Local Web Server](#local-web-server)
-10. [Font Management](#font-management)
-11. [Performance Optimization](#performance-optimization)
-12. [Development Guide](#development-guide)
-13. [Testing](#testing)
-14. [Troubleshooting](#troubleshooting)
-
----
-
 ## Overview
 
 The NovelGlide EPUB Renderer is a **hybrid rendering system** that supports two independent rendering engines:
